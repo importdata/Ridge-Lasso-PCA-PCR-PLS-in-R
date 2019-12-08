@@ -1,0 +1,1063 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+STAT 4360 Mini Project 5
+
+Name: Jaemin Lee
+
+Section 1: Answers to the specific question asked
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+## 1 a)
+library(ISLR)
+dim(Caravan) # 5822 observations with 86 variables (one of them being response)
+str(Caravan)
+head(Caravan$Purchase)
+
+# standardize the data
+standardized.X = scale(Caravan[,-86])
+str(standardized.X)
+head(standardized.X)
+var(Caravan[,1]) # 165
+var(standardized.X[,1]) # notice it's standardized to 1
+var(standardized.X[,2]) # standardized to 1
+
+# add back the response (Purchase) to the standardized data
+std.data = cbind(standardized.X, Caravan$Purchase)
+std.data = data.frame(std.data)
+colnames(std.data)[which(names(std.data) == "V86")] <- "Purchase"
+str(std.data$Purchase)
+
+# switch the purchase back to factor (Yes and no)
+old.purchase = c('1','2')
+new.purchase = factor(c('No', 'Yes'))
+std.data$Purchase = new.purchase[match(std.data$Purchase, old.purchase)]
+str(std.data$Purchase)
+```
+Question 1
+
+a) It is necessary to standardize the data so that all variables are given a mean of zero and a standard deviation of one. Some variables might dominate other variables. For example, if we measured salary in Euros or if we measured height in meters, then we'd get different classification results from what we get if those two variables are measured in dollars and feet. By standardizing, all variables will be on a comparable scale as all the variances will be standardized to 1. 
+```{r include=FALSE}
+## 1 b)
+test = 1:1000 # test ID
+train.X = standardized.X[-test ,] # train X
+str(train.X)
+test.X  = standardized.X[test ,] # test x
+str(test.X)
+train.Y = Caravan$Purchase[-test] # train y
+test.Y = Caravan$Purchase[test] # test y
+```
+b) Given in the code.
+```{r include=FALSE}
+## 1 c)
+# fit a logistic regression model
+# build model on train data
+lr.fit = glm(Purchase ~ ., family = binomial, data = std.data, subset = -test)
+coef(lr.fit)
+# Estimated probabilities for test data
+lr.prob = predict(lr.fit, std.data[test,], type = "response")
+lr.prob
+# replicate Nos 1000 times
+#lr.pred = rep("No", 1000)
+
+# Predicted classes (using 0.2 cutoff)
+lr.pred = ifelse(lr.prob > 0.2, "Yes", "No")
+
+```
+c) The confusion matrix for logistic regression is given below. 
+```{r echo=FALSE}
+# confusion matrix
+table(lr.pred, test.Y)
+```
+Sensitivity = TP/(TP+FN) = 15/(15+44) = 0.25, specificity = TN/(TN+FP) = 897/(897+44) = 0.95, and overall misclassification rate = (44+44)/1000 = 0.088 = 8.8%. This means that the accuracy for logistic regression is 100-8.8 = 91.2%. 
+
+```{r include=FALSE}
+#### 1.d)
+
+library(glmnet)
+# Create response and the design matrix (without the first column of 1s)
+y = std.data$Purchase
+str(y)
+x = model.matrix(Purchase ~., std.data)[, -1]
+length(x)
+# set up a grid of lambda values in decreasing sequence
+grid = 10^seq(10, -2, length = 100)
+
+# relevel purchase to 1 and 2
+std.data$Purchase = old.purchase[match(std.data$Purchase, new.purchase)]
+y = as.numeric(std.data$Purchase)
+
+# fit ridge regression (alpha = 0) for each lambda on the grid
+ridge.mod = glmnet(x, y, alpha = 0, lambda = grid)
+coef(ridge.mod)
+plot(ridge.mod, xvar = "lambda")
+
+```
+
+    
+```{r include=FALSE}
+# switch response from character to numeric
+#y = y[-test]
+#dim(y)
+#x = x
+
+# find the best lambda using cross validation (binomial for the binary outcome variable)
+set.seed(1)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial", type.measure = 'mse')
+plot(cv.ridge)
+
+############################ find the best lambda using test data
+
+# fit model using training data
+ridge.fit <- glmnet(x,y, alpha = 0, family = "binomial")
+
+# best lambda = 0.06399002
+best.lambda = cv.ridge$lambda.min;best.lambda
+
+# Estimated probabilities for test data
+# Get predictions on test set with best lambda and compute test MSE
+x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+ridge.prob = predict(ridge.fit, x.test, s = best.lambda, type = "response")
+
+# Predicted classes (using 0.2 cutoff)
+ridge.pred = ifelse(ridge.prob > 0.2, "Yes", "No")
+
+
+# fit model to training data
+ridge.fit= glmnet(x,y, alpha = 0, family = "binomial", lambda = best.lambda) 
+#coef(model)
+
+###
+
+# Get predictions on test set with best lambda and compute test MSE
+x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+ridge.prob = predict(ridge.fit, x.test, s = best.lambda, type = "response")
+```
+d) The confusion matrix for ridge is given below. 
+```{r echo=FALSE}
+# convert probabilities to prediction
+ridge.pred = ifelse(ridge.prob > 0.2, "Yes", "No")
+length(ridge.pred)
+table(pred = ridge.pred, true = test.Y)
+```
+Sensitivity = TP/(TP+FN) = 6/(6+53) = 0.10, specificity = TN/(TN+FP) = 923/(923+18) = 0.98, and overall misclassification rate = (53+18)/1000 = 0.071 = 7.1%. This means that the accuracy for ridge is 100-7.1 = 92.9%. Compared to the coefficients of logistic regression, one can definitely see that the coefficients of ridge regression has shrunk towards 0. This makes sense as ridge regression tries to regularize (or shrink) the coefficients so that the model doesn't overfit.  
+```{r include=FALSE}
+################## 1 e)
+
+# find the best lambda using cross validation (binomial for the binary outcome variable)
+set.seed(1)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial", type.measure = 'mse')
+plot(cv.lasso)
+
+# best lambda = 0.005565526
+best.lambda.lasso = cv.lasso$lambda.min;best.lambda.lasso
+
+# fit model to training data
+lasso.fit= glmnet(x,y, alpha = 1, family = "binomial", lambda = best.lambda.lasso)
+coef(lasso.fit)
+
+###
+
+# Get predictions on test set with best lambda and compute test MSE
+#x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+lasso.prob = predict(lasso.fit, x.test, s = best.lambda.lasso, type = "response")
+
+```
+e) The confusion matrix for lasso is shown below.
+```{r echo=FALSE}
+# convert probabilities to prediction
+library(caret)
+lasso.pred = ifelse(lasso.prob > 0.2, "Yes", "No")
+table(pred = lasso.pred, true = test.Y)
+
+```
+Sensitivity = TP/(TP+FN) = 5/(5+54) = 0.08, specificity = TN/(TN+FP) = 936/(936+5) = 0.99, and overall misclassification rate = (54+5)/1000 = 0.059 = 5.9%. This means that the accuracy for ridge is 100-5.9 = 94.1%. Just as what we observed in the ridge regression, the coefficients of estimates has shrunken compared to those of logistic regression. Lasso also tries to regularize coefficients towards 0, so that model doesn't overfit. 
+
+f) Based on the misclassification rates from c)-e), lasso delivers the lowest misclassification rate (5.9%), followed by ridge (7.1%) and logistic regression (8.8%). Considering that the insurance company cares about if customers would purchase the insurance plan, they may want to look at sensitivity. Sensitivity turned out to be the highest for logistic regression (0.25) and ridge and lasso were the lowest (both 0.08). If the company cares more about customers not purchasing the insurance, they they may look at the specificity. Specificity turned out to be the highest for lasso (0.99), followed by ridge (0.98) and logistic regression (0.95). Given that misclassification rates for all three of them were about the same, I would recommend using logistic regression as the company is likely to care about if the customers would purchase the insuruance plan and the sensitivity of logistic regression is the highest. 
+
+Question 2
+```{r include=FALSE}
+########### 2 a)
+Mali = read.csv("C:/Users/jaemi/Desktop/STAT 4360/Projects/Project 5/mali.csv")
+dim(Mali)
+head(Mali)
+
+# detect outliers
+plot(Mali$Family, Mali$DistRD)
+
+#boxplot(Family ~ DistRD, data = Mali)$out # 81, 52, 57 are outliers
+#boxplot(DistRD ~ Cattle, data = Mali, plot = FALSE)$out # 80, 500, 500, 100, 100, 90
+```
+a) Outliers are detected below and they are removed in the code.
+```{r include=FALSE}
+# remove outliers for Family vs DistRD
+plot(Mali$Family,Mali$DistRD,xlab = "Family", ylab = "DistRD")
+family.outlier = c(1:nrow(Mali))[Mali$Family > 140]
+DistRD.outlier = c(1:nrow(Mali))[Mali$DistRD > 400]
+outlier1 = c(family.outlier, DistRD.outlier)
+text(Mali$Family[outlier1]+1, Mali$DistRD[outlier1]-15, labels = outlier1, cex=0.7)
+
+# remove outliers for DistRd vs Cattle
+plot(Mali$DistRD, Mali$Cattle, xlab = "DistRD", ylab = "Cattle")
+DistRD.outlier2 = c(1:nrow(Mali))[Mali$DistRD > 400]
+cattle.outlier = c(1:nrow(Mali))[Mali$Cattle > 80]
+outlier2 = c(DistRD.outlier2, cattle.outlier)
+text(Mali$DistRD[outlier2]+1, Mali$Cattle[outlier2]-3, labels=outlier2,cex=0.7)
+
+# store data with no outlier
+mali.no.outliers = Mali[-unique(c(outlier1, outlier2)), ]
+```
+b) Standardization is needed as the variance of variables are different. By standardizing the data set, variances are all equal to 1.
+```{r include=FALSE}
+########## 2 b)
+standardized.mali = scale(mali.no.outliers)
+str(standardized.mali)
+head(standardized.mali)
+var(Mali[,1]) # 550
+var(Mali[,2]) # 6533
+var(standardized.mali[,1]) # notice it's standardized to 1
+var(standardized.mali[,2]) # also 1
+```
+
+```{r include=FALSE}
+###########2 c)
+pca.mali <- prcomp(standardized.mali, center = T, scale = T)
+names(pca.mali)
+pca.mali$center # check center
+pca.mali$scale # all at 1
+pca.mali$rotation # get the loading matrix
+
+# get he score matrix
+head(pca.mali$x)
+
+# check covariance matrix of the scores
+round(cov(pca.mali$x), 3)
+```
+
+```{r include=FALSE}
+# plot variances of the principal components (scree plot)
+# plot(pca.mali, xlab = "Principal Component", ylab = "Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+```
+
+```{r include=FALSE}
+# Display a biplot the results (shows both pc scores and loading vectors)
+biplot(pca.mali, scale = 0)
+```
+
+```{r include=FALSE}
+# Compute the proportion of variance explained (PVE)
+pc.var = pca.mali$sdev^2
+pve.mali = pc.var/sum(pc.var)
+pve.mali
+cumsum(pve.mali)
+```
+
+```{r echo=FALSE}
+# scree plot
+plot(pve.mali, xlab = "Principal Components", ylab = "Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+```
+
+```{r echo=FALSE}
+# plot of cumulative PVE
+plot(cumsum(pve.mali), xlab="Principal Components", ylab = "Cumulative Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+
+```
+c) The cumulative Proportion of Variance Explained vs Principal Components plot shows that first 6 components explains 94% of the total variability in the data set and it seems to be a reasonable number given the screeplot. 
+```{r include=FALSE}
+### 2 d)
+pca.mali <- prcomp(standardized.mali, center = T, scale = T)
+
+pca.mali
+# extract loading matrix of 1st and 2nd PCs
+pca.mali$rotation[,1:2]
+
+# get he score matrix
+head(pca.mali$x)
+
+# check the calculation
+#round(cov(pca$x), 3)
+
+# correlations of the standardized variables with the components and the cumulative percentage of the total variability explained by the two components.
+
+# correlation between PC1 and PC2
+cor(pca.mali$rotation[,1], pca.mali$rotation[,2]) 
+
+# Compute the proportion of variance explained (PVE) using PC1 and PC2
+pca.mali
+pc.var.12 = (pca.mali$sdev[1:2])^2
+pve.mali.12 = pc.var.12/sum(pc.var.12)
+pve.mali.12
+cumsum(pve.mali.12)
+
+# check covariance matrix of the scores
+round(cov(pca.mali$x), 3)
+```
+d) Below shows the correlations of standardized variables with the first and the second principal components. 
+
+```{r echo=FALSE}
+# get the scores for PC1 and PC2
+# get he score matrix
+pca.mali$x[,1:2]
+```
+```{r echo=FALSE}
+# Display a biplot the results (shows both pc scores and loading vectors)
+#pca.mali$rotation[,1:2]
+#pca.mali
+biplot(pca.mali, scale = 0)
+
+# scree plot using PC1 and PC2
+plot(pve.mali.12, xlab = "Principal Components 1 and 2", ylab = "Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+
+# cumulative percentage of the total variability explained by PC1 and PC2
+plot(cumsum(pve.mali.12), xlab="Principal Components", ylab = "Cumulative Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+```
+PC1 is defined by all the variables except DistRD. Based on the loading matrix of PC1, it represents that Family, Cotton, and Bull have higher weights (all above 0.4) and Maize, Sorg, Millet, and Goats are equally weighted (range from 0.2 to 0.35). This tells us that a farm defined by PC1 both harvests crops and raises cattles. PC2 is defined by all the variables except Family, Cotton, Bull, and Goats. Sorg is the variable that has the heighest weight (0.60), followed by DistRD (0.49), and Millet (0.41). PC2 tells us that a farm that is farther away from the road is likely to harvest large amount of crops such as Sorghum and Millet. Also, based on the biplot, one can see that Maize plays an important role in both PC1 and PC2 as its arrow forms a 45 degrees.
+
+```{r echo=FALSE}
+pca.mali$rotation[,1:5]
+```
+e) To determine which component explains "farm size", one can look at the loadings of Cotton, Maize, Sorg, Millet. They represent hectares of those crops. Based on the loadings, PC1 and PC5 seem to explain farm size as their loadinns of Cotton, Maize, Sorg, Millet are higher than the other principal components. One can choose PC5, as the loading of distance from road is higher than that of PC1. Based on our observation in part d) the farther away a farm is from the road, the bigger the farm size (or the land size) it has. Also, one can pick PC3 as a "goats and distance to road" component as the loadings of Goats and DistRD are the heighest in PC3 compared to the other principal components. 
+
+Question 3
+a) - f) Given in the code.
+```{r include=FALSE}
+###### 3 a)
+
+library(ISLR)
+str(Auto)
+library(caret)
+library(DAAG)
+# remove name variables
+Auto = Auto[,-9]
+
+# fit a linear model with all variables
+lm.fit = lm(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto)
+
+lm.cv = train(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, method = "lm", trControl=trainControl(method = 'cv', number = 10, savePredictions = TRUE, verboseIter = TRUE))
+lm.cv$results # RMSE = 2.95 -> MSE = 8.7
+
+lm.coef = coef(lm.fit);lm.coef
+lm.test.error = 8.7
+
+cv.lm = cv.lm(Auto, lm.fit, m = 10, seed = 1)
+
+```
+
+```{r include=FALSE}
+### 3 b)
+library(leaps)
+library(ISLR)
+
+x = data.frame(model.matrix(lm.fit)[,-1])
+y = Auto[,1]
+
+# Total number of predictors in the data
+totpred = ncol(x)
+
+# best subset selection
+best.sub = regsubsets(y ~ ., data = x, nvmax = totpred, method = "exhaustive")
+
+# check adjusted R^2 to pick how many variables to use
+best.sub.summary = summary(best.sub);best.sub.summary
+plot(best.sub.summary$adjr2, xlab = "Model Number", ylab = "Adjusted R^2", pch = 19, type = "b")
+which.max(best.sub.summary$adjr2) # model 7 has the best R^2 = 0.861
+best.sub.summary$adjr2
+
+# lm reduced by best subset selection
+lm.reduced.best.sub = lm(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2)+ acceleration + year + as.factor(origin), data = Auto)
+
+# fit a linear model with cylinders, displacement, horsepower, weight, accelration, year, and origin b/c these give you the biggest R^2
+lm.cv.best.subset = train(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) +year + as.factor(origin), data = Auto, method = "lm", trControl=trainControl(method = 'cv', number = 10, savePredictions = TRUE, verboseIter = TRUE))
+lm.cv.best.subset$results # RMSE = 2.91 -> MSE = 8.46%
+
+best.subset.test.error = 8.46
+lm.reduced.best.sub.coef = coef(lm.reduced.best.sub)
+```
+
+```{r include=FALSE}
+### 3 c)
+# ridge regression
+library(glmnet)
+y = Auto$mpg
+x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[,-1]
+
+# Set up a grid of lambda values (from 10^10 to 10^(-2)) in decreasing sequence
+grid <- 10^seq(10, -2, length = 100)
+
+# Fit ridge regression for each lambda on the grid 
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+plot(ridge.mod, xvar = "lambda")
+
+```
+
+```{r include=FALSE}
+# fit model using training data
+ridge.mod = glmnet(x, y, alpha = 0, lambda = grid, thresh = 1e-12)
+
+# use 10-fold cross validation to estimate test MSE from training data
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 0)
+plot(cv.out)
+
+bestlam = cv.out$lambda.min; bestlam # 0.6487382
+
+# Test MSE for the best value of lambda
+ridge.pred = predict(ridge.mod, s = bestlam, newx = x)
+
+# Refit the model on the full dataset
+out <- glmnet(x, y, alpha = 0)
+
+# Get estimates for the best value of lambda
+ridge.coeff = predict(out, type = "coefficients", s = bestlam)
+
+# initialize array to store 10 CV errors
+cv.ridge.error = seq(1,10)
+
+# create 10 folds CV
+library(caret)
+set.seed(1)
+folds = createFolds(Auto$mpg, k=10)
+
+# apply CV
+i = 1
+for(val in folds){
+  # get sets in proper form
+  new.y = Auto$mpg[-(c(val))]
+  new.x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[-(c(val)), -1]
+  
+  # fit ridge regression to training data
+  test.ridge = glmnet(new.x, new.y, alpha = 0, lambda = bestlam)
+  
+  # get sets in proper form
+  newx.model = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[(c(val)), -1]
+  
+  # perform predictions on the fold that is left out
+  test.ridge.pred = predict(test.ridge, s = bestlam, newx = newx.model)
+  
+  # store test error rate
+  cv.ridge.error[i] = mean((test.ridge.pred - Auto$mpg[(c(val))])^2)
+  
+  # increment i
+  i = i+1
+}
+# get avg test error rate
+ridge.test.error = mean(cv.ridge.error);ridge.test.error
+```
+
+```{r include=FALSE}
+#### 3 d) 
+# fit model using training data
+lasso.mod = glmnet(x, y, alpha = 1, lambda = grid, thresh = 1e-12)
+
+# use 10-fold cross validation to estimate test MSE from training data
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+plot(cv.out)
+
+bestlam = cv.out$lambda.min; bestlam # 0.6487382
+
+# Test MSE for the best value of lambda
+lasso.pred = predict(lasso.mod, s = bestlam, newx = x)
+
+# Refit the model on the full dataset
+lasso.out <- glmnet(x, y, alpha = 1, lambda = bestlam)
+
+# Get estimates for the best value of lambda
+lasso.coef = predict(lasso.out, type = "coefficients", s = bestlam)
+
+library(caret)
+# initialize array to store 10 CV errors
+cv.lasso.error = seq(1,10)
+
+# create 10 folds CV
+set.seed(1)
+folds = createFolds(Auto$mpg, k=10)
+
+# apply CV
+i = 1
+for(val in folds){
+  # get sets in proper form
+  new.y = Auto$mpg[-(c(val))]
+  new.x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[-(c(val)), -1]
+  
+  # fit lasso regression to training data
+  test.lasso = glmnet(new.x, new.y, alpha = 1, lambda = bestlam)
+  
+  # get sets in proper form
+  newx.model = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[(c(val)), -1]
+  
+  # perform predictions on the fold that is left out
+  test.lasso.pred = predict(test.lasso, s = bestlam, newx = newx.model)
+  
+  # store test error rate
+  cv.lasso.error[i] = mean((test.lasso.pred - Auto$mpg[(c(val))])^2)
+  
+  # increment i
+  i = i+1
+}
+# get avg test error rate
+lasso.test.error = mean(cv.lasso.error);lasso.test.error # 8.89
+
+```
+
+```{r include=FALSE}
+### 3 e)
+library(pls)
+library(ISLR)
+
+x = model.matrix(lm.fit)[,-1]
+y = Auto[,1]
+set.seed(1)
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+
+# fit PCR to training set using 10 fold CV
+set.seed(1)
+pcr.fit <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, subset = train, validation = "CV", segments = 10, scale = TRUE)
+validationplot(pcr.fit, val.type = "MSEP")
+
+# We see that lowest cross-validation error occurs when M = 9
+
+#compute test MSE
+pcr.pred <- predict(pcr.fit, x[test, ], ncomp = 9)
+pcr.test.error = mean((pcr.pred - y.test)^2);pcr.test.error #8.44
+
+# Refit the model on the full dataset 
+pcr.fit <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, scale = TRUE, ncomp = 9)
+pcr.coef = pcr.fit$coefficients[1:12];pcr.coef
+```
+
+```{r include=FALSE}
+### 3 f)
+
+# fit PLS
+set.seed(1)
+pls.fit <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, validation = "CV", segments = 10, scale = TRUE)
+validationplot(pls.fit, val.type = "MSEP")
+
+# We see that lowest cross-validation error occurs when M = 9
+
+#compute test MSE
+pls.pred <- predict(pls.fit, x[test, ], ncomp = 9)
+pls.test.error = mean((pls.pred - y.test)^2);pls.test.error #8.11
+
+# Refit the model on the full dataset 
+pls.fit <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, scale = TRUE, ncomp = 9)
+pls.coef = pls.fit$coefficients[1:12];pls.coef
+```
+
+```{r include=FALSE}
+### 3 g)
+# tables from a)-f)
+nums = c(-35.8141933, 0.3466165, -5.2168003, 9.6719319, -43.6834405, 18.3152127, -71.1459336, 15.6451735, -0.1629983, 0.7825036, 1.1366002, 1.2166322)
+best.sub.coef = as.numeric(nums);best.sub.coef
+
+lm.result = as.data.frame(c(lm.coef[1:12], lm.test.error))
+rownames(lm.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(lm.result) = "LM"
+lm.result
+
+best.sub.result = as.data.frame(c(best.sub.coef[1:12], best.subset.test.error))
+rownames(best.sub.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(best.sub.result) = "Best Subset"
+best.sub.result
+
+ridge.result = as.data.frame(c(ridge.coeff[1:12], ridge.test.error))
+rownames(ridge.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(ridge.result) = "Ridge"
+ridge.result
+
+lasso.result = as.data.frame(c(lasso.coef[1:12], lasso.test.error))
+rownames(lasso.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(lasso.result) = "Lasso"
+lasso.result
+
+pcr.result = as.data.frame(c(pcr.coef[1:12], pcr.test.error))
+rownames(pcr.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(pcr.result) = "PCR"
+pcr.result
+
+pls.result = as.data.frame(c(pls.coef[1:12], pls.test.error))
+rownames(pls.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(pls.result) = "PLS"
+pls.result
+```
+g) Although all the methods below have low test error rates, I would recommend PLS. PLS yields the best outcome due to its error rate being the lowest (8.11%). This is because the variables in the Auto dataset are correlated to one another. PLS performs well when the variables have high correlations. 
+```{r echo=FALSE}
+# combine all the dataframe
+result = data.frame(lm.result, best.sub.result, ridge.result, lasso.result, pcr.result, pls.result);result
+```
+Section 2: R Code
+## 1 a)
+library(ISLR)
+dim(Caravan) # 5822 observations with 86 variables (one of them being response)
+str(Caravan)
+head(Caravan$Purchase)
+
+# standardize the data
+standardized.X = scale(Caravan[,-86])
+str(standardized.X)
+head(standardized.X)
+var(Caravan[,1]) # 165
+var(standardized.X[,1]) # notice it's standardized to 1
+var(standardized.X[,2]) # standardized to 1
+
+# add back the response (Purchase) to the standardized data
+std.data = cbind(standardized.X, Caravan$Purchase)
+std.data = data.frame(std.data)
+colnames(std.data)[which(names(std.data) == "V86")] <- "Purchase"
+str(std.data$Purchase)
+
+# switch the purchase back to factor (Yes and no)
+old.purchase = c('1','2')
+new.purchase = factor(c('No', 'Yes'))
+std.data$Purchase = new.purchase[match(std.data$Purchase, old.purchase)]
+str(std.data$Purchase)
+## 1 b)
+test = 1:1000 # test ID
+train.X = standardized.X[-test ,] # train X
+str(train.X)
+test.X  = standardized.X[test ,] # test x
+str(test.X)
+train.Y = Caravan$Purchase[-test] # train y
+test.Y = Caravan$Purchase[test] # test y
+## 1 c)
+# fit a logistic regression model
+# build model on train data
+lr.fit = glm(Purchase ~ ., family = binomial, data = std.data, subset = -test)
+coef(lr.fit)
+# Estimated probabilities for test data
+lr.prob = predict(lr.fit, std.data[test,], type = "response")
+lr.prob
+# replicate Nos 1000 times
+#lr.pred = rep("No", 1000)
+
+# Predicted classes (using 0.2 cutoff)
+lr.pred = ifelse(lr.prob > 0.2, "Yes", "No")
+# confusion matrix
+table(lr.pred, test.Y)
+#### 1.d)
+
+library(glmnet)
+# Create response and the design matrix (without the first column of 1s)
+y = std.data$Purchase
+str(y)
+x = model.matrix(Purchase ~., std.data)[, -1]
+length(x)
+# set up a grid of lambda values in decreasing sequence
+grid = 10^seq(10, -2, length = 100)
+
+# relevel purchase to 1 and 2
+std.data$Purchase = old.purchase[match(std.data$Purchase, new.purchase)]
+y = as.numeric(std.data$Purchase)
+
+# fit ridge regression (alpha = 0) for each lambda on the grid
+ridge.mod = glmnet(x, y, alpha = 0, lambda = grid)
+coef(ridge.mod)
+plot(ridge.mod, xvar = "lambda")
+# find the best lambda using cross validation (binomial for the binary outcome variable)
+set.seed(1)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial", type.measure = 'mse')
+plot(cv.ridge)
+
+############################ find the best lambda using test data
+
+# fit model using training data
+ridge.fit <- glmnet(x,y, alpha = 0, family = "binomial")
+
+# best lambda = 0.06399002
+best.lambda = cv.ridge$lambda.min;best.lambda
+
+# Estimated probabilities for test data
+# Get predictions on test set with best lambda and compute test MSE
+x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+ridge.prob = predict(ridge.fit, x.test, s = best.lambda, type = "response")
+
+# Predicted classes (using 0.2 cutoff)
+ridge.pred = ifelse(ridge.prob > 0.2, "Yes", "No")
+
+
+# fit model to training data
+ridge.fit= glmnet(x,y, alpha = 0, family = "binomial", lambda = best.lambda) 
+#coef(model)
+
+###
+
+# Get predictions on test set with best lambda and compute test MSE
+x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+ridge.prob = predict(ridge.fit, x.test, s = best.lambda, type = "response")
+# convert probabilities to prediction
+ridge.pred = ifelse(ridge.prob > 0.2, "Yes", "No")
+length(ridge.pred)
+table(pred = ridge.pred, true = test.Y)
+################## 1 e)
+
+# find the best lambda using cross validation (binomial for the binary outcome variable)
+set.seed(1)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial", type.measure = 'mse')
+plot(cv.lasso)
+
+# best lambda = 0.005565526
+best.lambda.lasso = cv.lasso$lambda.min;best.lambda.lasso
+
+# fit model to training data
+lasso.fit= glmnet(x,y, alpha = 1, family = "binomial", lambda = best.lambda.lasso)
+coef(lasso.fit)
+
+###
+
+# Get predictions on test set with best lambda and compute test MSE
+#x.test <- model.matrix(Purchase ~., std.data[test,])[,-1]
+lasso.prob = predict(lasso.fit, x.test, s = best.lambda.lasso, type = "response")
+
+```
+e) The confusion matrix for lasso is shown below.
+```{r echo=FALSE}
+# convert probabilities to prediction
+library(caret)
+lasso.pred = ifelse(lasso.prob > 0.2, "Yes", "No")
+table(pred = lasso.pred, true = test.Y)
+########### 2 a)
+Mali = read.csv("C:/Users/jaemi/Desktop/STAT 4360/Projects/Project 5/mali.csv")
+dim(Mali)
+head(Mali)
+
+# detect outliers
+plot(Mali$Family, Mali$DistRD)
+
+#boxplot(Family ~ DistRD, data = Mali)$out # 81, 52, 57 are outliers
+#boxplot(DistRD ~ Cattle, data = Mali, plot = FALSE)$out # 80, 500, 500, 100, 100, 90
+# remove outliers for Family vs DistRD
+plot(Mali$Family,Mali$DistRD,xlab = "Family", ylab = "DistRD")
+family.outlier = c(1:nrow(Mali))[Mali$Family > 140]
+DistRD.outlier = c(1:nrow(Mali))[Mali$DistRD > 400]
+outlier1 = c(family.outlier, DistRD.outlier)
+text(Mali$Family[outlier1]+1, Mali$DistRD[outlier1]-15, labels = outlier1, cex=0.7)
+
+# remove outliers for DistRd vs Cattle
+plot(Mali$DistRD, Mali$Cattle, xlab = "DistRD", ylab = "Cattle")
+DistRD.outlier2 = c(1:nrow(Mali))[Mali$DistRD > 400]
+cattle.outlier = c(1:nrow(Mali))[Mali$Cattle > 80]
+outlier2 = c(DistRD.outlier2, cattle.outlier)
+text(Mali$DistRD[outlier2]+1, Mali$Cattle[outlier2]-3, labels=outlier2,cex=0.7)
+
+# store data with no outlier
+mali.no.outliers = Mali[-unique(c(outlier1, outlier2)), ]
+########## 2 b)
+standardized.mali = scale(mali.no.outliers)
+str(standardized.mali)
+head(standardized.mali)
+var(Mali[,1]) # 550
+var(Mali[,2]) # 6533
+var(standardized.mali[,1]) # notice it's standardized to 1
+var(standardized.mali[,2]) # also 1
+###########2 c)
+pca.mali <- prcomp(standardized.mali, center = T, scale = T)
+names(pca.mali)
+pca.mali$center # check center
+pca.mali$scale # all at 1
+pca.mali$rotation # get the loading matrix
+
+# get he score matrix
+head(pca.mali$x)
+
+# check covariance matrix of the scores
+round(cov(pca.mali$x), 3)
+# Display a biplot the results (shows both pc scores and loading vectors)
+biplot(pca.mali, scale = 0)
+# Compute the proportion of variance explained (PVE)
+pc.var = pca.mali$sdev^2
+pve.mali = pc.var/sum(pc.var)
+pve.mali
+cumsum(pve.mali)
+# scree plot
+plot(pve.mali, xlab = "Principal Components", ylab = "Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+# plot of cumulative PVE
+plot(cumsum(pve.mali), xlab="Principal Components", ylab = "Cumulative Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+### 2 d)
+pca.mali <- prcomp(standardized.mali, center = T, scale = T)
+
+pca.mali
+# extract loading matrix of 1st and 2nd PCs
+pca.mali$rotation[,1:2]
+
+# get he score matrix
+head(pca.mali$x)
+
+# check the calculation
+#round(cov(pca$x), 3)
+
+# correlations of the standardized variables with the components and the cumulative percentage of the total variability explained by the two components.
+
+# correlation between PC1 and PC2
+cor(pca.mali$rotation[,1], pca.mali$rotation[,2]) 
+
+# Compute the proportion of variance explained (PVE) using PC1 and PC2
+pca.mali
+pc.var.12 = (pca.mali$sdev[1:2])^2
+pve.mali.12 = pc.var.12/sum(pc.var.12)
+pve.mali.12
+cumsum(pve.mali.12)
+
+# check covariance matrix of the scores
+round(cov(pca.mali$x), 3)
+# get the scores for PC1 and PC2
+# get he score matrix
+pca.mali$x[,1:2]
+```
+```{r echo=FALSE}
+# Display a biplot the results (shows both pc scores and loading vectors)
+#pca.mali$rotation[,1:2]
+#pca.mali
+biplot(pca.mali, scale = 0)
+
+# scree plot using PC1 and PC2
+plot(pve.mali.12, xlab = "Principal Components 1 and 2", ylab = "Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+
+# cumulative percentage of the total variability explained by PC1 and PC2
+plot(cumsum(pve.mali.12), xlab="Principal Components", ylab = "Cumulative Proportion of Variance Explained", ylim = c(0,1), type = 'b')
+pca.mali$rotation[,1:5]
+###### 3 a)
+
+library(ISLR)
+str(Auto)
+library(caret)
+library(DAAG)
+# remove name variables
+Auto = Auto[,-9]
+
+# fit a linear model with all variables
+lm.fit = lm(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto)
+
+lm.cv = train(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, method = "lm", trControl=trainControl(method = 'cv', number = 10, savePredictions = TRUE, verboseIter = TRUE))
+lm.cv$results # RMSE = 2.95 -> MSE = 8.7
+
+lm.coef = coef(lm.fit);lm.coef
+lm.test.error = 8.7
+
+cv.lm = cv.lm(Auto, lm.fit, m = 10, seed = 1)
+### 3 b)
+library(leaps)
+library(ISLR)
+
+x = data.frame(model.matrix(lm.fit)[,-1])
+y = Auto[,1]
+
+# Total number of predictors in the data
+totpred = ncol(x)
+
+# best subset selection
+best.sub = regsubsets(y ~ ., data = x, nvmax = totpred, method = "exhaustive")
+
+# check adjusted R^2 to pick how many variables to use
+best.sub.summary = summary(best.sub);best.sub.summary
+plot(best.sub.summary$adjr2, xlab = "Model Number", ylab = "Adjusted R^2", pch = 19, type = "b")
+which.max(best.sub.summary$adjr2) # model 7 has the best R^2 = 0.861
+best.sub.summary$adjr2
+
+# lm reduced by best subset selection
+lm.reduced.best.sub = lm(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2)+ acceleration + year + as.factor(origin), data = Auto)
+
+# fit a linear model with cylinders, displacement, horsepower, weight, accelration, year, and origin b/c these give you the biggest R^2
+lm.cv.best.subset = train(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) +year + as.factor(origin), data = Auto, method = "lm", trControl=trainControl(method = 'cv', number = 10, savePredictions = TRUE, verboseIter = TRUE))
+lm.cv.best.subset$results # RMSE = 2.91 -> MSE = 8.46%
+
+best.subset.test.error = 8.46
+lm.reduced.best.sub.coef = coef(lm.reduced.best.sub)
+### 3 c)
+# ridge regression
+library(glmnet)
+y = Auto$mpg
+x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[,-1]
+
+# Set up a grid of lambda values (from 10^10 to 10^(-2)) in decreasing sequence
+grid <- 10^seq(10, -2, length = 100)
+
+# Fit ridge regression for each lambda on the grid 
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+plot(ridge.mod, xvar = "lambda")
+# fit model using training data
+ridge.mod = glmnet(x, y, alpha = 0, lambda = grid, thresh = 1e-12)
+
+# use 10-fold cross validation to estimate test MSE from training data
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 0)
+plot(cv.out)
+
+bestlam = cv.out$lambda.min; bestlam # 0.6487382
+
+# Test MSE for the best value of lambda
+ridge.pred = predict(ridge.mod, s = bestlam, newx = x)
+
+# Refit the model on the full dataset
+out <- glmnet(x, y, alpha = 0)
+
+# Get estimates for the best value of lambda
+ridge.coeff = predict(out, type = "coefficients", s = bestlam)
+
+# initialize array to store 10 CV errors
+cv.ridge.error = seq(1,10)
+
+# create 10 folds CV
+library(caret)
+set.seed(1)
+folds = createFolds(Auto$mpg, k=10)
+
+# apply CV
+i = 1
+for(val in folds){
+  # get sets in proper form
+  new.y = Auto$mpg[-(c(val))]
+  new.x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[-(c(val)), -1]
+  
+  # fit ridge regression to training data
+  test.ridge = glmnet(new.x, new.y, alpha = 0, lambda = bestlam)
+  
+  # get sets in proper form
+  newx.model = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[(c(val)), -1]
+  
+  # perform predictions on the fold that is left out
+  test.ridge.pred = predict(test.ridge, s = bestlam, newx = newx.model)
+  
+  # store test error rate
+  cv.ridge.error[i] = mean((test.ridge.pred - Auto$mpg[(c(val))])^2)
+  
+  # increment i
+  i = i+1
+}
+# get avg test error rate
+ridge.test.error = mean(cv.ridge.error);ridge.test.error
+#### 3 d) 
+# fit model using training data
+lasso.mod = glmnet(x, y, alpha = 1, lambda = grid, thresh = 1e-12)
+
+# use 10-fold cross validation to estimate test MSE from training data
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+plot(cv.out)
+
+bestlam = cv.out$lambda.min; bestlam # 0.6487382
+
+# Test MSE for the best value of lambda
+lasso.pred = predict(lasso.mod, s = bestlam, newx = x)
+
+# Refit the model on the full dataset
+lasso.out <- glmnet(x, y, alpha = 1, lambda = bestlam)
+
+# Get estimates for the best value of lambda
+lasso.coef = predict(lasso.out, type = "coefficients", s = bestlam)
+
+library(caret)
+# initialize array to store 10 CV errors
+cv.lasso.error = seq(1,10)
+
+# create 10 folds CV
+set.seed(1)
+folds = createFolds(Auto$mpg, k=10)
+
+# apply CV
+i = 1
+for(val in folds){
+  # get sets in proper form
+  new.y = Auto$mpg[-(c(val))]
+  new.x = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[-(c(val)), -1]
+  
+  # fit lasso regression to training data
+  test.lasso = glmnet(new.x, new.y, alpha = 1, lambda = bestlam)
+  
+  # get sets in proper form
+  newx.model = model.matrix(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), Auto)[(c(val)), -1]
+  
+  # perform predictions on the fold that is left out
+  test.lasso.pred = predict(test.lasso, s = bestlam, newx = newx.model)
+  
+  # store test error rate
+  cv.lasso.error[i] = mean((test.lasso.pred - Auto$mpg[(c(val))])^2)
+  
+  # increment i
+  i = i+1
+}
+# get avg test error rate
+lasso.test.error = mean(cv.lasso.error);lasso.test.error # 8.89
+### 3 e)
+library(pls)
+library(ISLR)
+
+x = model.matrix(lm.fit)[,-1]
+y = Auto[,1]
+set.seed(1)
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+
+# fit PCR to training set using 10 fold CV
+set.seed(1)
+pcr.fit <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, subset = train, validation = "CV", segments = 10, scale = TRUE)
+validationplot(pcr.fit, val.type = "MSEP")
+
+# We see that lowest cross-validation error occurs when M = 9
+
+#compute test MSE
+pcr.pred <- predict(pcr.fit, x[test, ], ncomp = 9)
+pcr.test.error = mean((pcr.pred - y.test)^2);pcr.test.error #8.44
+
+# Refit the model on the full dataset 
+pcr.fit <- pcr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, scale = TRUE, ncomp = 9)
+pcr.coef = pcr.fit$coefficients[1:12];pcr.coef
+### 3 f)
+
+# fit PLS
+set.seed(1)
+pls.fit <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, validation = "CV", segments = 10, scale = TRUE)
+validationplot(pls.fit, val.type = "MSEP")
+
+# We see that lowest cross-validation error occurs when M = 9
+
+#compute test MSE
+pls.pred <- predict(pls.fit, x[test, ], ncomp = 9)
+pls.test.error = mean((pls.pred - y.test)^2);pls.test.error #8.11
+
+# Refit the model on the full dataset 
+pls.fit <- plsr(mpg ~ cylinders + poly(displacement, 2) + poly(horsepower,2) + poly(weight, 2) + acceleration +year + as.factor(origin), data = Auto, scale = TRUE, ncomp = 9)
+pls.coef = pls.fit$coefficients[1:12];pls.coef
+### 3 g)
+# tables from a)-f)
+nums = c(-35.8141933, 0.3466165, -5.2168003, 9.6719319, -43.6834405, 18.3152127, -71.1459336, 15.6451735, -0.1629983, 0.7825036, 1.1366002, 1.2166322)
+best.sub.coef = as.numeric(nums);best.sub.coef
+
+lm.result = as.data.frame(c(lm.coef[1:12], lm.test.error))
+rownames(lm.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(lm.result) = "LM"
+lm.result
+
+best.sub.result = as.data.frame(c(best.sub.coef[1:12], best.subset.test.error))
+rownames(best.sub.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(best.sub.result) = "Best Subset"
+best.sub.result
+
+ridge.result = as.data.frame(c(ridge.coeff[1:12], ridge.test.error))
+rownames(ridge.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(ridge.result) = "Ridge"
+ridge.result
+
+lasso.result = as.data.frame(c(lasso.coef[1:12], lasso.test.error))
+rownames(lasso.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(lasso.result) = "Lasso"
+lasso.result
+
+pcr.result = as.data.frame(c(pcr.coef[1:12], pcr.test.error))
+rownames(pcr.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(pcr.result) = "PCR"
+pcr.result
+
+pls.result = as.data.frame(c(pls.coef[1:12], pls.test.error))
+rownames(pls.result) = c("Intercept", "cylinders", "poly(displacement, 2)1", "poly(displacement, 2)2", "poly(horsepower, 2)1", "poly(horsepower, 2)2", "poly(weight, 2)1", "poly(weight, 2)2", "acceleration", "year", "as.factor(origin)2", "as.factor(origin)3", "Test Error Rate")
+colnames(pls.result) = "PLS"
+pls.result
+# combine all the dataframe
+result = data.frame(lm.result, best.sub.result, ridge.result, lasso.result, pcr.result, pls.result);result
+
